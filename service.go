@@ -1,4 +1,5 @@
 package nrv
 
-type Service struct {
+type Service interface {
+
 }
