@@ -1,6 +1,11 @@
-package examples
+package main
 
+func main() {
+}
+
+/*
 import (
+	"os"
 	"fmt"
 	"github.com/appaquet/nrv"
 )
@@ -11,12 +16,11 @@ func main() {
 		Seeds: []nrv.Seed{
 			nrv.Seed{"127.0.0.1", 1234, 1235},
 		},
-		DefaultBinding: nrv.Binding{},
 	}
 	nrv.Initialize(config)
 
-	g := nrv.GetGroup("frontend")
-	g.Register("/home", nrv.Binding{
+	d := nrv.GetDomain("frontend.pwitter.com")
+	d.Bind("/home", &nrv.Binding{
 		Pattern: nrv.PatternRequestReply{
 			Method: nrv.M_GET,
 		},
@@ -24,20 +28,20 @@ func main() {
 		Consensus:   nrv.ConsensusPaxos{},
 		Persistence: nrv.PersistenceLog{},
 	})
-
-	g.Register("/user/(.*)/timeline", nrv.Binding{
+	d.Bind("/user/:id:/timeline", &nrv.Binding{
 		Pattern:  nrv.PatternPublishSubscribe{},
 		Endpoint: nrv.EndpointAll{},
 	})
 
-	nrv.Boot()
+	nrv.Start()
 }
 
 func Test1() {
-	g := nrv.GetGroup("frontend")
+	g := nrv.GetDomain("frontend.pwitter.com")
 
 	req, err := g.Get("/home", "test")
 	if err != nil {
+		printErr(err)
 		_ = req.WaitReply()
 	}
 
@@ -46,7 +50,10 @@ func Test1() {
 		},
 	})
 
-	g.Get("/user/10/timeline", nrv.Request{
+	g.Get("/user/:id:/timeline", nrv.Request{
+		Params: nrv.Map{
+			"id": 10,
+		},
 		OnReply: func(msg *nrv.Message) {
 			fmt.Printf("Received new tweet for user 10 %s", msg)
 		},
@@ -54,3 +61,6 @@ func Test1() {
 
 	g.Post("/user/10/timeline", "this is a tweet")
 }
+
+func printErr(err os.Error) {
+}*/

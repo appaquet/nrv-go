@@ -1,12 +1,19 @@
 package nrv
 
-import ()
+import (
+	"os"
+)
 
+var (
+	log       Logger = GoLogger{}
+	protocols []Protocol
+	config    Config
+)
 
 type Config struct {
-	DataPath       string
-	Seeds          []Seed
-	DefaultBinding Binding
+	DataPath  string
+	Seeds     []Seed
+	Protocols []Protocol
 }
 
 type Seed struct {
@@ -16,7 +23,16 @@ type Seed struct {
 }
 
 func Initialize(config Config) {
+	config = config
+	protocols = config.Protocols
 }
 
-func Boot() {
+func Start() {
+	for _, protocol := range protocols {
+		protocol.Start(config)
+	}
+}
+
+type Error interface {
+	os.Error
 }
