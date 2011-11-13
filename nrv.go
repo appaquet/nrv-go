@@ -1,38 +1,22 @@
 package nrv
 
 import (
-	"os"
+	"fmt"
 )
 
 var (
-	log       Logger = GoLogger{}
-	protocols []Protocol
-	config    Config
+	log Logger = NewLogger()
 )
 
-type Config struct {
-	DataPath  string
-	Seeds     []Seed
-	Protocols []Protocol
+type Error struct {
+	Message string
+	Code    uint16
 }
 
-type Seed struct {
-	Address string
-	TCPPort int
-	UDPPort int
+func (e Error) String() string {
+	return fmt.Sprintf("(%d) %s", e.Code, e.Message)
 }
 
-func Initialize(config Config) {
-	config = config
-	protocols = config.Protocols
-}
-
-func Start() {
-	for _, protocol := range protocols {
-		protocol.Start(config)
-	}
-}
-
-type Error interface {
-	os.Error
+func (e Error) Empty() bool {
+	return e.Message == "" && e.Code == 0
 }

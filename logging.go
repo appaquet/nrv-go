@@ -3,6 +3,7 @@ package nrv
 import (
 	golog "log"
 	"fmt"
+	"time"
 )
 
 type Logger interface {
@@ -15,29 +16,33 @@ type Logger interface {
 }
 
 type GoLogger struct {
+	first	int64
+}
 
+func NewLogger() Logger {
+	return GoLogger{time.Nanoseconds()}
 }
 
 func (gl GoLogger) Trace(msg string, v ...interface{}) {
-	golog.Printf("TRACE > %s", fmt.Sprintf(msg, v...))
+	golog.Printf("TRACE > %d %s", (time.Nanoseconds()-gl.first)/100000, fmt.Sprintf(msg, v...))
 }
 
 func (gl GoLogger) Debug(msg string, v ...interface{}) {
-	golog.Printf("DEBUG > %s", fmt.Sprintf(msg, v...))
+	golog.Printf("DEBUG > %d %s", (time.Nanoseconds()-gl.first)/100000, fmt.Sprintf(msg, v...))
 }
 
 func (gl GoLogger) Info(msg string, v ...interface{}) {
-	golog.Printf("INFO > %s", fmt.Sprintf(msg, v...))
+	golog.Printf("INFO > %d %s", (time.Nanoseconds()-gl.first)/100000, fmt.Sprintf(msg, v...))
 }
 
 func (gl GoLogger) Warning(msg string, v ...interface{}) {
-	golog.Printf("WARN > %s", fmt.Sprintf(msg, v...))
+	golog.Printf("WARN > %d %s", (time.Nanoseconds()-gl.first)/100000, fmt.Sprintf(msg, v...))
 }
 
 func (gl GoLogger) Error(msg string, v ...interface{}) {
-	golog.Printf("ERROR > %s", fmt.Sprintf(msg, v...))
+	golog.Printf("ERROR > %d %s", (time.Nanoseconds()-gl.first)/100000, fmt.Sprintf(msg, v...))
 }
 
 func (gl GoLogger) Fatal(msg string, v ...interface{}) {
-	golog.Fatalf("FATAL > %s", fmt.Sprintf(msg, v...))
+	golog.Fatalf("FATAL > %d %s", (gl.first-time.Nanoseconds())/100000, fmt.Sprintf(msg, v...))
 }

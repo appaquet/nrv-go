@@ -3,34 +3,73 @@ package main
 import (
 	"time"
 	"fmt"
+	"flag"
 	"github.com/appaquet/nrv"
 )
 
-func main() {
-	config := nrv.Config{
-		DataPath: "data",
-		Seeds: []nrv.Seed{
-			nrv.Seed{"master.appaquet.com", 1234, 1235},
-		},
-		Protocols: []nrv.Protocol{
-			&nrv.ProtocolNrv{Address: "127.0.0.1", TcpPort: 1234, UdpPort: 1235},
-			&nrv.ProtocolHttp{Address: "127.0.0.1", Port: 8888},
-		},
-	}
-	nrv.Initialize(config)
+var t = fmt.Errorf
 
-	d := nrv.GetDomain("localhost")
-	d.Bind(&nrv.Binding{
+func main() {
+	var node *int = flag.Int("node", 0, "0 = lb, 1 = front")
+	flag.Parse()
+
+	lbNode := &nrv.Node{Address: "127.0.0.1", TCPPort: 12001, UDPPort: 12002}
+	frontNode := &nrv.Node{Address: "127.0.0.1", TCPPort: 12011, UDPPort: 12012}
+
+
+	var localNode *nrv.Node
+	if *node == 0 {
+		localNode = lbNode
+	} else {
+		localNode = frontNode
+	}
+
+	cls := nrv.NewClusterStatic(localNode)
+
+	var httpProto nrv.Protocol
+	if *node == 0 {
+		httpProto = &nrv.ProtocolHTTP{
+			LocalAddress: "127.0.0.1",
+			Port:         8080,
+		}
+		cls.RegisterProtocol(httpProto)
+	}
+
+	// web worker
+	frontend := cls.GetDomain("frontend")
+	frontend.Members.Add(nrv.DomainMember{0, frontNode})
+	frontend.Bind(&nrv.Binding{
 		Path:       "/(home)/(.*)$",
 		PathParams: []string{"test", "toto"},
-		Pattern:    nrv.PatternRequestReply{},
-		Endpoint:   nrv.EndpointOne{},
-		Closure: func(msg *nrv.Message) *nrv.Message {
-			fmt.Printf("%s", msg.Params)
-			return nil
+		Closure: func(req *nrv.ReceivedRequest) {
+			req.Respond(&nrv.Message{ Params: nrv.Map{
+				"body": "<b>AllO!</b>",
+			}});
 		},
 	})
-	nrv.Start()
+
+	// front line
+	if *node == 0 {
+		lb := cls.GetDomain("localhost")
+		lb.Members.Add(nrv.DomainMember{0, lbNode})
+		lb.Bind(&nrv.Binding{
+			Path:     "(/.*)$",
+			Pattern:  &nrv.PatternRequestReply{},
+			Resolver: &nrv.ResolverOne{},
+			Protocol: httpProto,
+			Closure: func(req *nrv.ReceivedRequest) {
+				resp := <-frontend.CallChan(req.Message.Path, &nrv.Request{
+					Message: &nrv.Message{
+						Params: req.Message.Params,
+					},
+				})
+
+				req.Respond(resp.Message)
+			},
+		})
+	}
+
+	cls.Start()
 
 	for {
 		time.Sleep(1000000)
