@@ -34,6 +34,7 @@ type Binding struct {
 	rdvs	 map[uint32]*Request
 	newRdv   chan *Request
 	getRdv   chan *ReceivedRequest
+	rdvBack  chan bool
 	rdvId    chan uint32
 
 	pathRe  *regexp.Regexp
@@ -47,6 +48,7 @@ func (b *Binding) init(domain *Domain, cluster Cluster) {
 	b.pathRe = regexp.MustCompile("^" + b.Path)
 	b.newRdv = make(chan *Request, 1)
 	b.getRdv = make(chan *ReceivedRequest, 1)
+	b.rdvBack = make(chan bool, 1)
 	b.rdvId = make(chan uint32, 10)
 	b.rdvs = make(map[uint32]*Request)
 
@@ -86,6 +88,7 @@ func (b *Binding) handleRendezVous() {
 			select {
 			case req = <-b.newRdv:
 				b.rdvs[req.Message.SourceRdv] = req
+				b.rdvBack <- true
 
 			case resp = <-b.getRdv:
 				if req, found := b.rdvs[resp.Message.DestinationRdv]; found {
@@ -99,8 +102,9 @@ func (b *Binding) handleRendezVous() {
 				} else {
 					log.Error("Binding> Received a response for an unknown request: %s", resp)
 				}
+				b.rdvBack <- true
 
-			case <- time.After(1000000):
+			case <- time.After(10000000):
 				// TODO: Handle timeouts!
 			}
 
@@ -148,6 +152,7 @@ func (b *Binding) HandleRequestSend(request *Request) *Request {
 	if request.NeedReply() {
 		request.Message.SourceRdv = <-b.rdvId
 		b.newRdv <- request
+		<- b.rdvBack
 		log.Trace("Binding> Request %s will wait for a reply!", request)
 	}
 
@@ -164,6 +169,7 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 	// if there is a destination rdv, we call the rendez vous handler
 	if request.Message.DestinationRdv > 0 {
 		b.getRdv <- request
+		<- b.rdvBack
 		return request
 	} 
 	
