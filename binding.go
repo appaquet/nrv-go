@@ -152,8 +152,8 @@ func (b *Binding) HandleRequestSend(request *Request) *Request {
 
 	if request.NeedReply() {
 		request.Message.SourceRdv = <-b.rdvId
-		<- b.rdvBack
 		b.newRdv <- request
+		<- b.rdvBack
 		log.Trace("Binding> Request %s will wait for a reply!", request)
 	}
 
@@ -169,8 +169,8 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 
 	// if there is a destination rdv, we call the rendez vous handler
 	if request.Message.DestinationRdv > 0 {
-		<- b.rdvBack
 		b.getRdv <- request
+		<- b.rdvBack
 		return request
 	} 
 	
