@@ -87,6 +87,7 @@ func (b *Binding) handleRendezVous() {
 
 			select {
 			case req = <-b.newRdv:
+				log.Trace("Adding rendezvous for %d", req.Message.SourceRdv)
 				b.rdvs[req.Message.SourceRdv] = req
 				b.rdvBack <- true
 
