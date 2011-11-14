@@ -91,6 +91,7 @@ func (b *Binding) handleRendezVous() {
 				b.rdvBack <- true
 
 			case resp = <-b.getRdv:
+				b.rdvBack <- true
 				if req, found := b.rdvs[resp.Message.DestinationRdv]; found {
 					req.respReceived++
 
@@ -102,7 +103,6 @@ func (b *Binding) handleRendezVous() {
 				} else {
 					log.Error("Binding> Received a response for an unknown request: %s", resp)
 				}
-				b.rdvBack <- true
 
 			case <- time.After(10000000):
 				// TODO: Handle timeouts!
