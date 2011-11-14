@@ -48,11 +48,16 @@ type Request struct {
 
 	respReceived int
 	respNeeded   int
+	rdvSync	     chan bool
 
 	Domain  *Domain
 	Binding *Binding
 
 	chanWait chan *ReceivedRequest
+}
+
+func (r *Request) init() {
+	r.rdvSync = make(chan bool, 1)
 }
 
 func (r *Request) String() string {

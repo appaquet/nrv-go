@@ -34,7 +34,6 @@ type Binding struct {
 	rdvs	 map[uint32]*Request
 	newRdv   chan *Request
 	getRdv   chan *ReceivedRequest
-	rdvBack  chan bool
 	rdvId    chan uint32
 
 	pathRe  *regexp.Regexp
@@ -48,7 +47,6 @@ func (b *Binding) init(domain *Domain, cluster Cluster) {
 	b.pathRe = regexp.MustCompile("^" + b.Path)
 	b.newRdv = make(chan *Request, 1)
 	b.getRdv = make(chan *ReceivedRequest, 1)
-	b.rdvBack = make(chan bool, 1)
 	b.rdvId = make(chan uint32, 10)
 	b.rdvs = make(map[uint32]*Request)
 
@@ -89,10 +87,9 @@ func (b *Binding) handleRendezVous() {
 			case req = <-b.newRdv:
 				log.Trace("Adding rendezvous for %d", req.Message.SourceRdv)
 				b.rdvs[req.Message.SourceRdv] = req
-				b.rdvBack <- true
+				req.rdvSync <- true
 
 			case resp = <-b.getRdv:
-				b.rdvBack <- true
 				if req, found := b.rdvs[resp.Message.DestinationRdv]; found {
 					req.respReceived++
 
@@ -144,6 +141,8 @@ func (b *Binding) Call(request *Request) *Request {
 }
 
 func (b *Binding) HandleRequestSend(request *Request) *Request {
+	request.init()
+
 	log.Trace("Binding> New request to send %s %s", request)
 	request.Binding = b
 	request.Domain = b.domain
@@ -153,7 +152,7 @@ func (b *Binding) HandleRequestSend(request *Request) *Request {
 	if request.NeedReply() {
 		request.Message.SourceRdv = <-b.rdvId
 		b.newRdv <- request
-		<- b.rdvBack
+		<- request.rdvSync
 		log.Trace("Binding> Request %s will wait for a reply!", request)
 	}
 
@@ -170,7 +169,6 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 	// if there is a destination rdv, we call the rendez vous handler
 	if request.Message.DestinationRdv > 0 {
 		b.getRdv <- request
-		<- b.rdvBack
 		return request
 	} 
 	
