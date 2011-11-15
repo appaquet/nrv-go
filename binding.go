@@ -47,7 +47,7 @@ func (b *Binding) init(domain *Domain, cluster Cluster) {
 	b.pathRe = regexp.MustCompile("^" + b.Path)
 	b.newRdv = make(chan *Request, 1)
 	b.getRdv = make(chan *ReceivedRequest, 1)
-	b.rdvId = make(chan uint32, 10)
+	b.rdvId = make(chan uint32, 100)
 	b.rdvs = make(map[uint32]*Request)
 
 	if b.Resolver == nil {
@@ -64,8 +64,6 @@ func (b *Binding) init(domain *Domain, cluster Cluster) {
 	b.Resolver.SetPreviousHandler(b)
 	b.Pattern.SetNextHandler(b.Protocol)
 	b.Pattern.SetPreviousHandler(b.Resolver)
-
-	log.Trace(b.Path)
 
 	b.handleRendezVous()
 }
@@ -85,14 +83,12 @@ func (b *Binding) handleRendezVous() {
 
 			select {
 			case req = <-b.newRdv:
-				log.Trace("Adding rendezvous for %d", req.Message.SourceRdv)
 				b.rdvs[req.Message.SourceRdv] = req
 				req.rdvSync <- true
 
 			case resp = <-b.getRdv:
 				if req, found := b.rdvs[resp.Message.DestinationRdv]; found {
 					req.respReceived++
-
 					if req.respNeeded >= req.respReceived {
 						b.rdvs[resp.Message.DestinationRdv] = nil, false
 					}
@@ -102,7 +98,7 @@ func (b *Binding) handleRendezVous() {
 					log.Error("Binding> Received a response for an unknown request: %s", resp)
 				}
 
-			case <- time.After(10000000):
+			case <- time.After(1000000000):
 				// TODO: Handle timeouts!
 			}
 

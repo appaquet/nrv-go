@@ -10,8 +10,7 @@ import (
 	"http"
 	"strings"
 	"time"
-
-	"github.com/appaquet/typedio"
+	"gob"
 )
 
 const (
@@ -44,14 +43,14 @@ func (np *ProtocolNrv) Start(cluster Cluster) {
 	tcpAddr := net.TCPAddr{net.ParseIP(np.LocalAddress), int(np.TCPPort)}
 	np.tcpSock, err = net.ListenTCP("tcp", &tcpAddr)
 	if err != nil {
-		log.Fatal("Can't start nrv tcp listener: %s", err)
+		log.Fatal("ProtocolNrv> Can't start nrv TCP listener: %s", err)
 	}
 	go np.acceptTCP()
 
 	udpAddr := net.UDPAddr{net.ParseIP(np.LocalAddress), int(np.UDPPort)}
 	np.udpSock, err = net.ListenUDP("udp", &udpAddr)
 	if err != nil {
-		log.Fatal("Can't start nrv tcp listener: %s", err)
+		log.Fatal("ProtocolNrv> Can't start nrv UDP listener: %s", err)
 	}
 	go np.acceptUDP()
 
@@ -62,7 +61,7 @@ func (np *ProtocolNrv) acceptTCP() {
 	for {
 		conn, err := np.tcpSock.Accept()
 		if err != nil {
-			log.Error("Couldn't accept TCP connexion: %s\n", err)
+			log.Error("ProtocolNrv> Couldn't accept TCP connexion: %s\n", err)
 		}
 
 		// TODO: do something with conn
@@ -83,9 +82,7 @@ func (np *ProtocolNrv) acceptUDP() {
 			log.Error("ProtocolNrv> Error while reading UDP (read %d) from %s: %s\n", n, adr, err)
 		} else {
 			reader := io.Reader(bytes.NewBuffer(buf))
-			tio := typedio.NewReader(reader)
-
-			message, err := np.readMessage(tio)
+			message, err := np.readMessage(reader)
 			if err != nil {
 				log.Error("ProtocolNrv> Got an error reading message %s", err)
 			}
@@ -108,7 +105,7 @@ func (np *ProtocolNrv) acceptUDP() {
 }
 
 func (np *ProtocolNrv) getConnection(node *Node) *NrvConnection {
-	log.Trace("Opening new UDP connection to %s", node)
+	log.Trace("ProtocolNrv> Opening new UDP connection to %s", node)
 	adr := net.UDPAddr{net.ParseIP(node.Address), int(node.UDPPort)}
 	con, err := net.DialUDP("udp", nil, &adr) // TODO: should use local address instead of nil (implicitly local)
 	if err != nil {
@@ -135,16 +132,15 @@ func (np *ProtocolNrv) HandleRequestSend(request *Request) *Request {
 		// TODO: bypass if dest == local
 		conn := np.getConnection(dest.Node)
 		buf := bufio.NewWriter(conn.conn)
-		writer := typedio.NewWriter(buf)
-		err := np.writeMessage(writer, request.Message)
+		err := np.writeMessage(buf, request.Message)
 
 		// TODO: handle errors by sending them back to the OnError callback
 		if err != nil {
-			log.Fatal("Couldn't write message to connection %s", err)
+			log.Fatal("ProtocolNrv> Couldn't write message to connection %s", err)
 		}
 		err = buf.Flush()
 		if err != nil {
-			log.Fatal("Got an error writing to connection: %s", err)
+			log.Fatal("ProtocolNrv> Got an error writing to connection: %s", err)
 		}
 		conn.Release()
 	}
@@ -159,199 +155,17 @@ func (np *ProtocolNrv) HandleRequestReceive(request *ReceivedRequest) *ReceivedR
 	return request
 }
 
-func (np *ProtocolNrv) writeMessage(tio typedio.Writer, message *Message) (err os.Error) {
-	if err = tio.WriteString(message.DomainName); err != nil {
-		return
-	}
-	if err = tio.WriteString(message.Path); err != nil {
-		return
-	}
-	if err = np.writeDomainMember(tio, message.Destination); err != nil {
-		return
-	}
-	if err = tio.WriteUint32(message.DestinationRdv); err != nil {
-		return
-	}
-	if err = np.writeDomainMember(tio, message.Source); err != nil {
-		return
-	}
-	if err = tio.WriteUint32(message.SourceRdv); err != nil {
-		return
-	}
-	if err = tio.WriteString(message.Error.Message); err != nil {
-		return
-	}
-	if err = tio.WriteUint16(message.Error.Code); err != nil {
-		return
-	}
-	if err = tio.WriteUint16(uint16(len(message.Params))); err != nil {
-		return
-	}
-
-	for k, v := range message.Params {
-		if err = tio.WriteString(k); err != nil {
-			return
-		}
-
-		switch (v.(type)) {
-		case string:
-			if err = tio.WriteString("string"); err != nil {
-				return
-			}
-			if err = tio.WriteString(v.(string)); err != nil {
-				return
-			}
-		case int:
-			if err = tio.WriteString("int"); err != nil {
-				return
-			}
-			if err = tio.WriteInt64(int64(v.(int))); err != nil {
-				return
-			}
-		case bool: 
-			if err = tio.WriteString("bool"); err != nil {
-				return
-			}
-			if err = tio.WriteBool(v.(bool)); err != nil {
-				return
-			}
-		default:
-			log.Fatal("Unsupported type for paramter %s: %s", k, v)
-		}
-	}
-
-	return err
+func (np *ProtocolNrv) writeMessage(writer io.Writer, message *Message) os.Error {
+	encoder := gob.NewEncoder(writer)
+	return encoder.Encode(message)
 }
 
-func (np *ProtocolNrv) writeDomainMember(tio typedio.Writer, domainMembers *DomainMembers) (err os.Error) {
-	if err = tio.WriteUint8(uint8(domainMembers.Len())); err != nil {
-		return
-	}
-
-	for domainMember := range domainMembers.Iter() {
-		if err = tio.WriteUint32(uint32(domainMember.Token)); err != nil {
-			return
-		}
-		if err = tio.WriteString(domainMember.Node.Address); err != nil {
-			return
-		}
-		if err = tio.WriteUint16(uint16(domainMember.Node.TCPPort)); err != nil {
-			return
-		}
-		if err = tio.WriteUint16(uint16(domainMember.Node.UDPPort)); err != nil {
-			return
-		}
-	}
-	return err
-}
-
-func (np *ProtocolNrv) readMessage(tio typedio.Reader) (message *Message, err os.Error) {
+func (np *ProtocolNrv) readMessage(reader io.Reader) (message *Message, err os.Error) {
+	decoder := gob.NewDecoder(reader)
 	message = &Message{}
-
-	if message.DomainName, err = tio.ReadString(); err != nil {
-		return
-	}
-	if message.Path, err = tio.ReadString(); err != nil {
-		return
-	}
-	if message.Destination, err = np.readDomainMember(tio); err != nil {
-		return
-	}
-	if message.DestinationRdv, err = tio.ReadUint32(); err != nil {
-		return
-	}
-	if message.Source, err = np.readDomainMember(tio); err != nil {
-		return
-	}
-	if message.SourceRdv, err = tio.ReadUint32(); err != nil {
-		return
-	}
-	if message.Error.Message, err = tio.ReadString(); err != nil {
-		return
-	}
-	if message.Error.Code, err = tio.ReadUint16(); err != nil {
-		return
-	}
-	var nbParam uint16
-	if nbParam, err = tio.ReadUint16(); err != nil {
-		return
-	}
-
-	message.Params = NewMap()
-	for i:=0; i < int(nbParam); i++ {
-
-		var name string
-		if name, err = tio.ReadString(); err != nil {
-			return
-		}
-
-		var typ string
-		if typ, err = tio.ReadString(); err != nil {
-			return
-		}
-
-		var val interface{}
-		switch (typ) {
-		case "string":
-			if val, err = tio.ReadString(); err != nil {
-				return
-			}
-		case "int":
-			if val, err = tio.ReadInt64(); err != nil {
-				return
-			}
-		case "bool": 
-			if val, err = tio.ReadBool(); err != nil {
-				return
-			}
-		default:
-			log.Fatal("Unsupported type for paramter %s: %s", name, typ)
-		}
-
-		message.Params[name] = val
-	}
-
+	err = decoder.Decode(message)
 	return message, err
 }
-
-func (np *ProtocolNrv) readDomainMember(tio typedio.Reader) (domainMembers *DomainMembers, err os.Error) {
-	domainMembers = NewDomainMembers()
-
-	var count uint8
-	if count, err = tio.ReadUint8(); err != nil {
-		return
-	}
-
-	for i:=uint8(0); i < count; i++ {
-		domainMember := DomainMember{Token(0), &Node{}}
-		
-		var token uint32
-		if token, err = tio.ReadUint32(); err != nil {
-			return
-		}
-		domainMember.Token = Token(token)
-
-		if domainMember.Node.Address, err = tio.ReadString(); err != nil {
-			return
-		}
-
-		var port uint16
-		if port, err = tio.ReadUint16(); err != nil {
-			return
-		}
-		domainMember.Node.TCPPort = int(port)
-
-		if port, err = tio.ReadUint16(); err != nil {
-			return
-		}
-		domainMember.Node.UDPPort = int(port)
-
-		domainMembers.Add(domainMember)
-	}
-
-	return domainMembers, err
-}
-
 
 type NrvConnection struct {
 	conn  net.Conn
@@ -387,7 +201,7 @@ func (ph *ProtocolHTTP) Start(cls Cluster) {
 	go func() {
 		err := ph.server.ListenAndServe()
 		if err != nil {
-			log.Fatal("Couldn't start HTTP protocol: %s", err)
+			log.Fatal("ProtocolHTTP> Couldn't start HTTP protocol: %s", err)
 		}
 	}()
 
@@ -423,6 +237,7 @@ func (ph *ProtocolHTTP) ServeHTTP(respWriter http.ResponseWriter, req *http.Requ
 			}
 
 		case <-time.After(HTTP_MAX_WAIT):
+			log.Debug("ProtocolHTTP> Response timeout!")
 			http.Error(respWriter, "Response timeout", http.StatusBadGateway)
 		}
 	} else {

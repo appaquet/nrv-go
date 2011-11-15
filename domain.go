@@ -80,7 +80,7 @@ type DomainMember struct {
 
 
 type DomainMembers struct {
-	array []DomainMember
+	Array []DomainMember
 }
 
 func NewDomainMembers(members... DomainMember) *DomainMembers {
@@ -90,7 +90,7 @@ func NewDomainMembers(members... DomainMember) *DomainMembers {
 func (dm *DomainMembers) Iter() chan DomainMember {
 	c := make(chan DomainMember)
 	go func() {
-		for _, m := range dm.array {
+		for _, m := range dm.Array {
 			c <- m
 		}
 		close(c)
@@ -99,35 +99,35 @@ func (dm *DomainMembers) Iter() chan DomainMember {
 }
 
 func (dm *DomainMembers) String() string {
-	return fmt.Sprintf("%s", dm.array)
+	return fmt.Sprintf("%s", dm.Array)
 }
 
 func (dm *DomainMembers) Get(i int) DomainMember {
-	return dm.array[i]
+	return dm.Array[i]
 }
 
 func (dm *DomainMembers) Add(member DomainMember) {
-	dm.array = append(dm.array, member)
+	dm.Array = append(dm.Array, member)
 	sort.Sort(dm)
 }
 
 func (dm *DomainMembers) Len() int {
-	return len(dm.array)
+	return len(dm.Array)
 }
 
 func (dm *DomainMembers) Empty() bool {
-	if dm == nil || len(dm.array) == 0 {
+	if dm == nil || len(dm.Array) == 0 {
 		return true
 	}
 	return false
 }
 
 func (dm *DomainMembers) Less(i, j int) bool {
-	return dm.array[i].Token < dm.array[j].Token
+	return dm.Array[i].Token < dm.Array[j].Token
 }
 
 func (dm *DomainMembers) Swap(i, j int) {
-	dm.array[i], dm.array[j] = dm.array[i], dm.array[i]
+	dm.Array[i], dm.Array[j] = dm.Array[i], dm.Array[i]
 }
 
 
