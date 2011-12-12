@@ -18,9 +18,22 @@ const (
 	HTTP_MAX_WAIT = 5000000000 // 5 secs
 )
 
+type ProtocolMarshaller interface {
+	MarshallerName() string
+	CanMarshal(obj interface{}) bool
+	Marshal(obj interface{}) ([]byte, os.Error)
+	Unmarshal(bytes []byte) (interface{}, os.Error)
+}
+
+type MarshalledObject struct {
+	Name  string
+	Bytes []byte
+}
+
 type Protocol interface {
 	CallHandler
 	Start(cluster Cluster)
+	AddMarshaller(marshaller ProtocolMarshaller)
 }
 
 type ProtocolNrv struct {
@@ -28,9 +41,10 @@ type ProtocolNrv struct {
 	TCPPort      int
 	UDPPort      int
 
-	tcpSock *net.TCPListener
-	udpSock *net.UDPConn
-	cluster Cluster
+	tcpSock       *net.TCPListener
+	udpSock       *net.UDPConn
+	cluster       Cluster
+	marshallers  map[string]ProtocolMarshaller
 
 	nextHandler     CallHandler
 	previousHandler CallHandler
@@ -38,30 +52,38 @@ type ProtocolNrv struct {
 
 func (np *ProtocolNrv) Start(cluster Cluster) {
 	np.cluster = cluster
+	np.marshallers = make(map[string]ProtocolMarshaller)
+
+	gob.Register(&MarshalledObject{})
 
 	var err os.Error
 	tcpAddr := net.TCPAddr{net.ParseIP(np.LocalAddress), int(np.TCPPort)}
 	np.tcpSock, err = net.ListenTCP("tcp", &tcpAddr)
 	if err != nil {
-		log.Fatal("ProtocolNrv> Can't start nrv TCP listener: %s", err)
+		Log.Fatal("ProtocolNrv> Can't start nrv TCP listener: %s", err)
 	}
 	go np.acceptTCP()
 
 	udpAddr := net.UDPAddr{net.ParseIP(np.LocalAddress), int(np.UDPPort)}
 	np.udpSock, err = net.ListenUDP("udp", &udpAddr)
 	if err != nil {
-		log.Fatal("ProtocolNrv> Can't start nrv UDP listener: %s", err)
+		Log.Fatal("ProtocolNrv> Can't start nrv UDP listener: %s", err)
 	}
 	go np.acceptUDP()
 
-	log.Info("ProtocolNrv> Started")
+	Log.Info("ProtocolNrv> Started")
 }
+
+func (np *ProtocolNrv) AddMarshaller(marshaller ProtocolMarshaller) {
+	np.marshallers[marshaller.MarshallerName()] = marshaller 
+}
+
 
 func (np *ProtocolNrv) acceptTCP() {
 	for {
 		conn, err := np.tcpSock.Accept()
 		if err != nil {
-			log.Error("ProtocolNrv> Couldn't accept TCP connexion: %s\n", err)
+			Log.Error("ProtocolNrv> Couldn't accept TCP connexion: %s\n", err)
 		}
 
 		// TODO: do something with conn
@@ -76,15 +98,15 @@ func (np *ProtocolNrv) acceptUDP() {
 		buf := make([]byte, MAX_UDP_SIZE)
 		n, adr, err := np.udpSock.ReadFrom(buf)
 
-		log.Trace("ProtocolNrv> New UDP packet received of %d bytes from %s %s", n, adr, err)
+		Log.Trace("ProtocolNrv> New UDP packet received of %d bytes from %s %s", n, adr, err)
 
 		if err != nil {
-			log.Error("ProtocolNrv> Error while reading UDP (read %d) from %s: %s\n", n, adr, err)
+			Log.Error("ProtocolNrv> Error while reading UDP (read %d) from %s: %s\n", n, adr, err)
 		} else {
 			reader := io.Reader(bytes.NewBuffer(buf))
 			message, err := np.readMessage(reader)
 			if err != nil {
-				log.Error("ProtocolNrv> Got an error reading message %s", err)
+				Log.Error("ProtocolNrv> Got an error reading message %s", err)
 			}
 
 			domain := np.cluster.GetDomain(message.DomainName)
@@ -96,7 +118,7 @@ func (np *ProtocolNrv) acceptUDP() {
 					Message: message,
 				})
 			} else {
-				log.Error("ProtocolNrv> Got a message for a non existing path/domain %s %s", domain, message.Path)
+				Log.Error("ProtocolNrv> Got a message for a non existing. Domain=%s Path=%s", domain, message.Path)
 			}
 
 
@@ -104,16 +126,16 @@ func (np *ProtocolNrv) acceptUDP() {
 	}
 }
 
-func (np *ProtocolNrv) getConnection(node *Node) *NrvConnection {
-	log.Trace("ProtocolNrv> Opening new UDP connection to %s", node)
+func (np *ProtocolNrv) getConnection(node *Node) *nrvConnection {
+	Log.Trace("ProtocolNrv> Opening new UDP connection to %s", node)
 	adr := net.UDPAddr{net.ParseIP(node.Address), int(node.UDPPort)}
 	con, err := net.DialUDP("udp", nil, &adr) // TODO: should use local address instead of nil (implicitly local)
 	if err != nil {
-		log.Error("Couldn't create connection to node %s: %s", node, err)
+		Log.Error("Couldn't create connection to node %s: %s", node, err)
 		return nil
 	}
 
-	return &NrvConnection{con}
+	return &nrvConnection{con}
 }
 
 
@@ -126,7 +148,7 @@ func (np *ProtocolNrv) SetPreviousHandler(handler CallHandler) {
 }
 
 func (np *ProtocolNrv) HandleRequestSend(request *Request) *Request {
-	log.Trace("ProtocolNrv> Sending request %s", request)
+	Log.Trace("ProtocolNrv> Sending request %s", request)
 
 	for dest := range request.Message.Destination.Iter() {
 		// TODO: bypass if dest == local
@@ -136,42 +158,130 @@ func (np *ProtocolNrv) HandleRequestSend(request *Request) *Request {
 
 		// TODO: handle errors by sending them back to the OnError callback
 		if err != nil {
-			log.Fatal("ProtocolNrv> Couldn't write message to connection %s", err)
+			Log.Fatal("ProtocolNrv> Couldn't write message to connection %s", err)
 		}
 		err = buf.Flush()
 		if err != nil {
-			log.Fatal("ProtocolNrv> Got an error writing to connection: %s", err)
+			Log.Fatal("ProtocolNrv> Got an error writing to connection: %s", err)
 		}
 		conn.Release()
 	}
 
-	log.Trace("ProtocolNrv> Sending request %s. Done!", request)
+	Log.Trace("ProtocolNrv> Sending request %s. Done!", request)
 	return request
 }
 
 func (np *ProtocolNrv) HandleRequestReceive(request *ReceivedRequest) *ReceivedRequest {
-	log.Trace("ProtocolNrv> Received request %s", request)
+	Log.Trace("ProtocolNrv> Received request %s", request)
 
 	return request
 }
 
 func (np *ProtocolNrv) writeMessage(writer io.Writer, message *Message) os.Error {
+	mParams, err := np.preMarshal(message.Params)
+	if err != nil {
+		return err
+	}
+
+	message.Params = mParams.(Map)
+
 	encoder := gob.NewEncoder(writer)
 	return encoder.Encode(message)
 }
 
+func (np *ProtocolNrv) preMarshal(obj interface{}) (newObj interface{}, err os.Error) {
+	switch obj.(type) {
+	case Map:
+		mp := obj.(Map)
+		for k, v := range mp {
+			mp[k], err = np.preMarshal(v)
+			if err != nil {
+				return
+			}
+		}
+
+	case []interface{}:
+		ar := obj.([]interface{})
+		for i, v := range ar {
+			ar[i], err = np.preMarshal(v)
+			if err != nil {
+				return
+			}
+		}
+
+	default:
+		for marshName, marsh := range np.marshallers {
+			if marsh.CanMarshal(obj) {
+				bytes, err := marsh.Marshal(obj)
+				if err != nil {
+					return nil, err
+				}
+				return MarshalledObject{marshName, bytes}, nil
+			}
+		}
+	}
+
+	return obj, err
+}
+
+func (np *ProtocolNrv) postUnmarshal(obj interface{}) (newObj interface{}, err os.Error) {
+	switch obj.(type) {
+	case Map:
+		mp := obj.(Map)
+		for k, v := range mp {
+			mp[k], err = np.postUnmarshal(v)
+			if err != nil {
+				return
+			}
+		}
+
+	case []interface{}:
+		ar := obj.([]interface{})
+		for i, v := range ar {
+			ar[i], err = np.postUnmarshal(v)
+			if err != nil {
+				return
+			}
+		}
+
+	case *MarshalledObject:
+		mObj := obj.(*MarshalledObject)
+		marsh, found := np.marshallers[mObj.Name]
+		if found {
+			return marsh.Unmarshal(mObj.Bytes)
+		} else {
+			return nil, os.NewError(fmt.Sprintf("Cannot find marshaller named %s", mObj.Name))
+		}
+
+	}
+
+	return obj, err
+}
+
 func (np *ProtocolNrv) readMessage(reader io.Reader) (message *Message, err os.Error) {
 	decoder := gob.NewDecoder(reader)
+
 	message = &Message{}
 	err = decoder.Decode(message)
+	if err != nil {
+		return nil, err
+	}
+
+	var mParams interface{}
+	mParams, err = np.postUnmarshal(message.Params)
+	if err != nil {
+		return nil, err
+	}
+	message.Params = mParams.(Map)
+
 	return message, err
 }
 
-type NrvConnection struct {
+type nrvConnection struct {
 	conn  net.Conn
 }
 
-func (c *NrvConnection) Release() {
+func (c *nrvConnection) Release() {
 	c.conn.Close()
 }
 
@@ -201,15 +311,19 @@ func (ph *ProtocolHTTP) Start(cls Cluster) {
 	go func() {
 		err := ph.server.ListenAndServe()
 		if err != nil {
-			log.Fatal("ProtocolHTTP> Couldn't start HTTP protocol: %s", err)
+			Log.Fatal("ProtocolHTTP> Couldn't start HTTP protocol: %s", err)
 		}
 	}()
 
-	log.Info("ProtocolHTTP> Started")
+	Log.Info("ProtocolHTTP> Started")
+}
+
+func (ph *ProtocolHTTP) AddMarshaller(marshaller ProtocolMarshaller) {
+	panic("ProtocolHTTP doesn't support protocol marshaller yet")
 }
 
 func (ph *ProtocolHTTP) ServeHTTP(respWriter http.ResponseWriter, req *http.Request) {
-	log.Debug("ProtocolHTTP> Request received for %s %s", req.Host, req.RawURL)
+	Log.Debug("ProtocolHTTP> Request received for %s %s", req.Host, req.RawURL)
 
 	sp := strings.Split(req.Host, ":")
 	d := ph.cls.GetDomain(sp[0])
@@ -237,11 +351,11 @@ func (ph *ProtocolHTTP) ServeHTTP(respWriter http.ResponseWriter, req *http.Requ
 			}
 
 		case <-time.After(HTTP_MAX_WAIT):
-			log.Debug("ProtocolHTTP> Response timeout!")
+			Log.Debug("ProtocolHTTP> Response timeout!")
 			http.Error(respWriter, "Response timeout", http.StatusBadGateway)
 		}
 	} else {
-		log.Debug("ProtocolHTTP> No binding found for %s %s", req.Host, req.RawURL)
+		Log.Debug("ProtocolHTTP> No binding found for %s %s", req.Host, req.RawURL)
 		http.NotFound(respWriter, req)
 	}
 }
@@ -255,11 +369,11 @@ func (np *ProtocolHTTP) SetPreviousHandler(handler CallHandler) {
 }
 
 func (np *ProtocolHTTP) HandleRequestSend(request *Request) *Request {
-	log.Trace("ProtocolHTTP> Sending request %s", request)
+	Log.Trace("ProtocolHTTP> Sending request %s", request)
 	return request
 }
 
 func (np *ProtocolHTTP) HandleRequestReceive(request *ReceivedRequest) *ReceivedRequest {
-	log.Trace("ProtocolHTTP> Received request %s", request)
+	Log.Trace("ProtocolHTTP> Received request %s", request)
 	return request
 }

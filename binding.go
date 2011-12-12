@@ -95,7 +95,7 @@ func (b *Binding) handleRendezVous() {
 
 					go req.OnReply(resp)
 				} else {
-					log.Error("Binding> Received a response for an unknown request: %s", resp)
+					Log.Error("Binding> Received a response for an unknown request: %s", resp)
 				}
 
 			case <- time.After(1000000000):
@@ -139,7 +139,7 @@ func (b *Binding) Call(request *Request) *Request {
 func (b *Binding) HandleRequestSend(request *Request) *Request {
 	request.init()
 
-	log.Trace("Binding> New request to send %s %s", request)
+	Log.Trace("Binding> New request to send %s %s", request)
 	request.Binding = b
 	request.Domain = b.domain
 	request.Message.Source = NewDomainMembers(DomainMember{Token(0), b.cluster.GetLocalNode()})
@@ -149,7 +149,7 @@ func (b *Binding) HandleRequestSend(request *Request) *Request {
 		request.Message.SourceRdv = <-b.rdvId
 		b.newRdv <- request
 		<- request.rdvSync
-		log.Trace("Binding> Request %s will wait for a reply!", request)
+		Log.Trace("Binding> Request %s will wait for a reply!", request)
 	}
 
 	return b.Resolver.HandleRequestSend(request)
@@ -160,7 +160,7 @@ func (b *Binding) HandleProtocolRequestReceive(request *ReceivedRequest) *Receiv
 }
 
 func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedRequest {
-	log.Trace("Binding> Received new request %s", request)
+	Log.Trace("Binding> Received new request %s", request)
 
 	// if there is a destination rdv, we call the rendez vous handler
 	if request.Message.DestinationRdv > 0 {
@@ -178,7 +178,7 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 				message.DestinationRdv = request.Message.SourceRdv
 				b.Call(&Request{Message: message})
 			} else {
-				log.Error("Binding> Cannot respond to a message with no rendez-vous id %s", message)
+				Log.Error("Binding> Cannot respond to a message with no rendez-vous id %s", message)
 			}
 		}
 	}
@@ -186,7 +186,7 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 	if b.Closure != nil {
 		b.Closure(request)
 	} else {
-		log.Error("Binding> Closure not set for binding %s", b)
+		Log.Error("Binding> Closure not set for binding %s", b)
 	}
 	return request
 }

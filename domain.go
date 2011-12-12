@@ -46,7 +46,7 @@ func (d *Domain) Call(path string, request *Request) {
 	b, _ := d.FindBinding(path)
 
 	if b == nil {
-		log.Error("Domain> Cannot find binding for path %s", path)
+		Log.Error("Domain> Cannot find binding for path %s", path)
 
 		if request.OnReply != nil {
 			request.OnReply(&ReceivedRequest{

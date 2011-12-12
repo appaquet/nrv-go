@@ -24,7 +24,7 @@ func main() {
 		localNode = frontNode
 	}
 
-	cls := nrv.NewClusterStatic(localNode)
+	cls := nrv.NewStaticCluster(localNode)
 
 	var httpProto nrv.Protocol
 	if *node == 0 {

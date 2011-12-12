@@ -26,7 +26,7 @@ func (n *Node) String() string {
 }
 
 
-type ClusterStatic struct {
+type StaticCluster struct {
 	localNode       *Node
 	nodes           Nodes
 	domains         map[string]*Domain
@@ -34,8 +34,8 @@ type ClusterStatic struct {
 	defaultProtocol Protocol
 }
 
-func NewClusterStatic(localNode *Node) *ClusterStatic {
-	c := &ClusterStatic{
+func NewStaticCluster(localNode *Node) *StaticCluster {
+	c := &StaticCluster{
 		localNode: localNode,
 		domains:   make(map[string]*Domain),
 	}
@@ -52,25 +52,25 @@ func NewClusterStatic(localNode *Node) *ClusterStatic {
 }
 
 
-func (c *ClusterStatic) GetLocalNode() *Node {
+func (c *StaticCluster) GetLocalNode() *Node {
 	return c.localNode
 }
 
-func (c *ClusterStatic) RegisterProtocol(protocol Protocol) {
+func (c *StaticCluster) RegisterProtocol(protocol Protocol) {
 	c.protocols = append(c.protocols, protocol)
 }
 
-func (c *ClusterStatic) GetDefaultProtocol() Protocol {
+func (c *StaticCluster) GetDefaultProtocol() Protocol {
 	return c.defaultProtocol
 }
 
-func (c *ClusterStatic) Start() {
+func (c *StaticCluster) Start() {
 	for _, protocol := range c.protocols {
 		protocol.Start(c)
 	}
 }
 
-func (c *ClusterStatic) GetDomain(name string) *Domain {
+func (c *StaticCluster) GetDomain(name string) *Domain {
 	domain, found := c.domains[name]
 	if !found {
 		domain = newDomain(c)

@@ -86,6 +86,6 @@ func (rq *ReceivedRequest) Respond(msg *Message) {
 	if rq.OnRespond != nil {
 		rq.OnRespond(msg)
 	} else {
-		log.Fatal("No respond callback associated to received request")
+		Log.Fatal("No respond callback associated to received request")
 	}
 }
