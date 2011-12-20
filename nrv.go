@@ -5,7 +5,7 @@ import (
 )
 
 var (
-	Log Logger = NewLogger(4)
+	Log Logger = NewLogger(3)
 )
 
 type Error struct {

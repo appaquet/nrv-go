@@ -16,8 +16,8 @@ type Logger interface {
 }
 
 type GoLogger struct {
-	first	int64
-	level   int
+	first int64
+	level int
 }
 
 func NewLogger(level int) Logger {

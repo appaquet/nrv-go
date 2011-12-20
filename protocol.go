@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	MAX_UDP_SIZE = 1024
+	MAX_UDP_SIZE  = 1024
 	HTTP_MAX_WAIT = 5000000000 // 5 secs
 )
 
@@ -32,8 +32,10 @@ type MarshalledObject struct {
 
 type Protocol interface {
 	CallHandler
-	Start(cluster Cluster)
 	AddMarshaller(marshaller ProtocolMarshaller)
+
+	init(cluster Cluster)
+	start()
 }
 
 type ProtocolNrv struct {
@@ -41,21 +43,22 @@ type ProtocolNrv struct {
 	TCPPort      int
 	UDPPort      int
 
-	tcpSock       *net.TCPListener
-	udpSock       *net.UDPConn
-	cluster       Cluster
-	marshallers  map[string]ProtocolMarshaller
+	tcpSock     *net.TCPListener
+	udpSock     *net.UDPConn
+	cluster     Cluster
+	marshallers map[string]ProtocolMarshaller
 
 	nextHandler     CallHandler
 	previousHandler CallHandler
 }
 
-func (np *ProtocolNrv) Start(cluster Cluster) {
+func (np *ProtocolNrv) init(cluster Cluster) {
 	np.cluster = cluster
 	np.marshallers = make(map[string]ProtocolMarshaller)
-
 	gob.Register(&MarshalledObject{})
+}
 
+func (np *ProtocolNrv) start() {
 	var err os.Error
 	tcpAddr := net.TCPAddr{net.ParseIP(np.LocalAddress), int(np.TCPPort)}
 	np.tcpSock, err = net.ListenTCP("tcp", &tcpAddr)
@@ -75,9 +78,8 @@ func (np *ProtocolNrv) Start(cluster Cluster) {
 }
 
 func (np *ProtocolNrv) AddMarshaller(marshaller ProtocolMarshaller) {
-	np.marshallers[marshaller.MarshallerName()] = marshaller 
+	np.marshallers[marshaller.MarshallerName()] = marshaller
 }
-
 
 func (np *ProtocolNrv) acceptTCP() {
 	for {
@@ -109,8 +111,8 @@ func (np *ProtocolNrv) acceptUDP() {
 				Log.Error("ProtocolNrv> Got an error reading message %s", err)
 			}
 
-			domain := np.cluster.GetDomain(message.DomainName)
-			binding, pathParams := domain.FindBinding(message.Path)
+			service := np.cluster.GetService(message.ServiceName)
+			binding, pathParams := service.FindBinding(message.Path)
 
 			if binding != nil {
 				message.Params.Merge(pathParams)
@@ -118,9 +120,8 @@ func (np *ProtocolNrv) acceptUDP() {
 					Message: message,
 				})
 			} else {
-				Log.Error("ProtocolNrv> Got a message for a non existing. Domain=%s Path=%s", domain, message.Path)
+				Log.Error("ProtocolNrv> Got a message for a non existing. Service=%s Path=%s", service, message.Path)
 			}
-
 
 		}
 	}
@@ -137,7 +138,6 @@ func (np *ProtocolNrv) getConnection(node *Node) *nrvConnection {
 
 	return &nrvConnection{con}
 }
-
 
 func (np *ProtocolNrv) SetNextHandler(handler CallHandler) {
 	np.nextHandler = handler
@@ -278,32 +278,35 @@ func (np *ProtocolNrv) readMessage(reader io.Reader) (message *Message, err os.E
 }
 
 type nrvConnection struct {
-	conn  net.Conn
+	conn net.Conn
 }
 
 func (c *nrvConnection) Release() {
 	c.conn.Close()
 }
 
-
 type ProtocolHTTP struct {
-	LocalAddress string
-	Port         int
+	LocalAddress       string
+	Port               int
+	DefaultService     *Service
 
-	server *http.Server
-	cls    Cluster
+	server     *http.Server
+	cluster    Cluster
 
 	nextHandler     CallHandler
 	previousHandler CallHandler
 }
 
-func (ph *ProtocolHTTP) Start(cls Cluster) {
+func (ph *ProtocolHTTP) init(cluster Cluster) {
+	ph.cluster = cluster
+}
+
+func (ph *ProtocolHTTP) start() {
 	adr := fmt.Sprintf("%s:%d", ph.LocalAddress, ph.Port)
-	ph.cls = cls
 
 	ph.server = &http.Server{
-		Addr: adr,
-		Handler: ph,
+		Addr:         adr,
+		Handler:      ph,
 		ReadTimeout:  5000000000, // 5 seconds
 		WriteTimeout: 5000000000, // 5 seconds
 	}
@@ -326,9 +329,13 @@ func (ph *ProtocolHTTP) ServeHTTP(respWriter http.ResponseWriter, req *http.Requ
 	Log.Debug("ProtocolHTTP> Request received for %s %s", req.Host, req.RawURL)
 
 	sp := strings.Split(req.Host, ":")
-	d := ph.cls.GetDomain(sp[0])
 
-	binding, params := d.FindBinding(req.RawURL)
+	var service *Service = ph.DefaultService
+	if ph.DefaultService == nil {
+		service = ph.cluster.GetService(sp[0])
+	}
+
+	binding, params := service.FindBinding(req.RawURL)
 	if binding != nil {
 		responseWait := make(chan *Message, 1)
 		binding.HandleRequestReceive(&ReceivedRequest{
@@ -346,6 +353,14 @@ func (ph *ProtocolHTTP) ServeHTTP(respWriter http.ResponseWriter, req *http.Requ
 			if !resp.Error.Empty() {
 				http.Error(respWriter, resp.Error.Message, int(resp.Error.Code))
 			} else {
+				// set content type
+				contentType := "text/html"
+				if newContentType, found := resp.Params["content-type"]; found {
+					contentType = newContentType.(string)
+				}
+				respWriter.Header().Set("Content-Type", contentType)
+
+				// body
 				body := resp.Params["body"]
 				respWriter.Write([]uint8(fmt.Sprintf("%s", body)))
 			}

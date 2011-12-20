@@ -1,11 +1,11 @@
 package nrv
 
 import (
+	"reflect"
 	"regexp"
 	"fmt"
 	"time"
 )
-
 
 type CallHandler interface {
 	SetNextHandler(handler CallHandler)
@@ -24,26 +24,28 @@ type Binding struct {
 	Persistence PersistenceManager
 	Protocol    Protocol
 
-	Timeout     int
-	MaxRetry    int
+	Timeout  int
+	MaxRetry int
 
 	Controller interface{}
 	Method     string
 	Closure    func(request *ReceivedRequest)
 
-	rdvs	 map[uint32]*Request
-	newRdv   chan *Request
-	getRdv   chan *ReceivedRequest
-	rdvId    chan uint32
+	rflMethod  *reflect.Method
+
+	rdvs   map[uint32]*Request
+	newRdv chan *Request
+	getRdv chan *ReceivedRequest
+	rdvId  chan uint32
 
 	pathRe  *regexp.Regexp
-	domain  *Domain
+	service *Service
 	cluster Cluster
 }
 
-func (b *Binding) init(domain *Domain, cluster Cluster) {
+func (b *Binding) init(service *Service, cluster Cluster) {
 	b.cluster = cluster
-	b.domain = domain
+	b.service = service
 	b.pathRe = regexp.MustCompile("^" + b.Path)
 	b.newRdv = make(chan *Request, 1)
 	b.getRdv = make(chan *ReceivedRequest, 1)
@@ -57,7 +59,20 @@ func (b *Binding) init(domain *Domain, cluster Cluster) {
 		b.Pattern = &PatternRequestReply{}
 	}
 	if b.Protocol == nil {
-		b.Protocol = cluster.GetDefaultProtocol()
+		b.Protocol = service.GetDefaultProtocol()
+	}
+
+	// controller
+	if b.Controller != nil && b.Method != "" {
+		typ := reflect.TypeOf(b.Controller)
+		rMethod, found := typ.MethodByName(b.Method)
+
+		// TODO: better error handling here
+		if found {
+			b.rflMethod = &rMethod
+		} else {
+			Log.Fatal("nrv> Couldn't find method in controller: %s.%s", typ, b.Method)
+		}
 	}
 
 	b.Resolver.SetNextHandler(b.Pattern)
@@ -73,7 +88,7 @@ func (b *Binding) handleRendezVous() {
 		var rdvId uint32 = 0
 		for {
 			rdvId++
-			b.rdvId <- rdvId 	
+			b.rdvId <- rdvId
 		}
 	}()
 	go func() {
@@ -98,7 +113,7 @@ func (b *Binding) handleRendezVous() {
 					Log.Error("Binding> Received a response for an unknown request: %s", resp)
 				}
 
-			case <- time.After(1000000000):
+			case <-time.After(1000000000):
 				// TODO: Handle timeouts!
 			}
 
@@ -141,14 +156,14 @@ func (b *Binding) HandleRequestSend(request *Request) *Request {
 
 	Log.Trace("Binding> New request to send %s %s", request)
 	request.Binding = b
-	request.Domain = b.domain
-	request.Message.Source = NewDomainMembers(DomainMember{Token(0), b.cluster.GetLocalNode()})
-	request.Message.DomainName = b.domain.Name
+	request.Service = b.service
+	request.Message.Source = NewServiceMembers(ServiceMember{Token(0), b.cluster.GetLocalNode()})
+	request.Message.ServiceName = b.service.Name
 
 	if request.NeedReply() {
 		request.Message.SourceRdv = <-b.rdvId
 		b.newRdv <- request
-		<- request.rdvSync
+		<-request.rdvSync
 		Log.Trace("Binding> Request %s will wait for a reply!", request)
 	}
 
@@ -166,10 +181,10 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 	if request.Message.DestinationRdv > 0 {
 		b.getRdv <- request
 		return request
-	} 
-	
+	}
+
 	if request.OnRespond == nil {
-		request.OnRespond  = func (message *Message) {
+		request.OnRespond = func(message *Message) {
 			if request.Message.SourceRdv > 0 {
 				if message.Path == "" {
 					message.Path = request.Message.Path
@@ -185,8 +200,14 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 
 	if b.Closure != nil {
 		b.Closure(request)
+
+	} else if b.rflMethod != nil {
+		ctrlVal := reflect.ValueOf(b.Controller)
+		reqVal := reflect.ValueOf(request)
+		b.rflMethod.Func.Call([]reflect.Value{ctrlVal, reqVal})
+
 	} else {
-		Log.Error("Binding> Closure not set for binding %s", b)
+		Log.Error("Binding> No closure nor method set for binding %s", b)
 	}
 	return request
 }

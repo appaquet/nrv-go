@@ -4,7 +4,6 @@ import (
 	"fmt"
 )
 
-
 type Map map[string]interface{}
 
 func NewMap() Map {
@@ -17,19 +16,19 @@ func (m Map) Merge(other Map) {
 	}
 }
 
-
 type Message struct {
-	Destination 	*DomainMembers
-	DestinationRdv  uint32
+	Params Map
 
-	Source      *DomainMembers
-	SourceRdv   uint32
+	Destination    *ServiceMembers
+	DestinationRdv uint32
 
-	DomainName  string
+	Source    *ServiceMembers
+	SourceRdv uint32
+
+	ServiceName string
 	Path        string
 
-	Error       Error
-	Params  Map
+	Error  Error
 }
 
 func (m *Message) IsDestinationEmpty() bool {
@@ -37,20 +36,20 @@ func (m *Message) IsDestinationEmpty() bool {
 }
 
 func (m *Message) String() string {
-	return fmt.Sprintf("Dest=[%d %s], Src=[%d %s] %s %s", m.DestinationRdv, m.Destination, m.SourceRdv, m.Source, m.DomainName, m.Path) 
+	return fmt.Sprintf("Dest=[%d %s], Src=[%d %s] %s %s", m.DestinationRdv, m.Destination, m.SourceRdv, m.Source, m.ServiceName, m.Path)
 }
 
-
 type Request struct {
-	Message *Message
-	OnReply func (request *ReceivedRequest)
+	*Message
+
+	OnReply   func(request *ReceivedRequest)
 	WaitReply bool
 
 	respReceived int
 	respNeeded   int
-	rdvSync	     chan bool
+	rdvSync      chan bool
 
-	Domain  *Domain
+	Service *Service
 	Binding *Binding
 
 	chanWait chan *ReceivedRequest
@@ -78,11 +77,15 @@ func (r *Request) ReplyChan() chan *ReceivedRequest {
 }
 
 type ReceivedRequest struct {
-	Message *Message
+	*Message
 	OnRespond func(msg *Message)
 }
 
-func (rq *ReceivedRequest) Respond(msg *Message) {
+func (rq *ReceivedRequest) Respond(data Map) {
+	rq.RespondMessage(&Message{Params: data})
+}
+
+func (rq *ReceivedRequest) RespondMessage(msg *Message) {
 	if rq.OnRespond != nil {
 		rq.OnRespond(msg)
 	} else {
