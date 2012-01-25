@@ -2,13 +2,13 @@ package nrv
 
 import (
 	"fmt"
-	"sort"
 	"hash/crc32"
+	"sort"
 )
 
 type Service struct {
-	Name             string
-	DefaultProtocol  Protocol
+	Name            string
+	DefaultProtocol Protocol
 
 	cluster  Cluster
 	bindings []*Binding
@@ -39,35 +39,53 @@ func (s *Service) Bind(binding *Binding) *Binding {
 
 func (s *Service) BindMethod(path string, controller interface{}, method string) *Binding {
 	return s.Bind(&Binding{
-		Path: path,
+		Path:       path,
 		Controller: controller,
-		Method: method,
+		Method:     method,
 	})
+}
+
+func (s *Service) Reverse(controller interface{}, method string, params... string) string {
+	for _, binding := range s.bindings {
+		if binding.MatchesMethod(controller, method) {
+			return binding.GetPath(params...)
+		}
+	}
+
+	return ""
 }
 
 func (s *Service) FindBinding(path string) (*Binding, Map) {
 	for _, binding := range s.bindings {
 		if m := binding.Matches(path); m != nil {
+			Log.Debug("Found matching binding for %s: %s", path, binding)
 			return binding, m
 		}
 	}
 	return nil, nil
 }
 
-func (s *Service) CallChan(path string, request *Request) chan *ReceivedRequest {
+func (s *Service) CallWait(path string, reqBuild RequestBuilder) *ReceivedRequest {
+	return <-s.CallChan(path, reqBuild)
+}
+
+func (s *Service) CallChan(path string, reqBuild RequestBuilder) chan *ReceivedRequest {
+	request := reqBuild.ToRequest()
 	c := request.ReplyChan()
 	s.Call(path, request)
 	return c
 }
 
-func (s *Service) Call(path string, request *Request) {
+func (s *Service) Call(path string, reqBuild RequestBuilder) {
+	request := reqBuild.ToRequest()
 	b, _ := s.FindBinding(path)
 
 	if b == nil {
 		Log.Error("Service> Cannot find binding for path %s", path)
 
+		// TODO: better handling
 		if request.OnReply != nil {
-			request.OnReply(&ReceivedRequest{
+			request.handleReply(&ReceivedRequest{
 				Message: &Message{
 					Error: Error{"Path not found", 404},
 				},
@@ -96,54 +114,44 @@ type ServiceMember struct {
 }
 
 type ServiceMembers struct {
-	Array []ServiceMember
+	Slice []ServiceMember
 }
 
 func NewServiceMembers(members ...ServiceMember) *ServiceMembers {
 	return &ServiceMembers{members}
 }
 
-func (sm *ServiceMembers) Iter() chan ServiceMember {
-	c := make(chan ServiceMember)
-	go func() {
-		for _, m := range sm.Array {
-			c <- m
-		}
-		close(c)
-	}()
-	return c
-}
-
 func (sm *ServiceMembers) String() string {
-	return fmt.Sprintf("%s", sm.Array)
+	return fmt.Sprintf("%s", sm.Slice)
 }
 
 func (sm *ServiceMembers) Get(i int) ServiceMember {
-	return sm.Array[i]
+	// FIXME: what if no node???
+	return sm.Slice[i]
 }
 
 func (sm *ServiceMembers) Add(member ServiceMember) {
-	sm.Array = append(sm.Array, member)
+	sm.Slice = append(sm.Slice, member)
 	sort.Sort(sm)
 }
 
 func (sm *ServiceMembers) Len() int {
-	return len(sm.Array)
+	return len(sm.Slice)
 }
 
 func (sm *ServiceMembers) Empty() bool {
-	if sm == nil || len(sm.Array) == 0 {
+	if sm == nil || len(sm.Slice) == 0 {
 		return true
 	}
 	return false
 }
 
 func (sm *ServiceMembers) Less(i, j int) bool {
-	return sm.Array[i].Token < sm.Array[j].Token
+	return sm.Slice[i].Token < sm.Slice[j].Token
 }
 
 func (sm *ServiceMembers) Swap(i, j int) {
-	sm.Array[i], sm.Array[j] = sm.Array[i], sm.Array[i]
+	sm.Slice[i], sm.Slice[j] = sm.Slice[i], sm.Slice[i]
 }
 
 type Resolver interface {
@@ -155,6 +163,9 @@ type Resolver interface {
 type ResolverOne struct {
 	nextHandler     CallHandler
 	previousHandler CallHandler
+}
+
+func (r *ResolverOne) InitHandler(binding *Binding) {
 }
 
 func (r *ResolverOne) SetNextHandler(handler CallHandler) {
@@ -170,7 +181,7 @@ func (r *ResolverOne) Resolve(service *Service, path string) *ServiceMembers {
 	ret := NewServiceMembers()
 
 	var candidate *ServiceMember
-	for member := range service.Members.Iter() {
+	for _, member := range service.Members.Slice {
 		if member.Token <= pathToken && (candidate == nil || candidate.Token < member.Token) {
 			candidate = &member
 		}
@@ -189,7 +200,7 @@ func (r *ResolverOne) Resolve(service *Service, path string) *ServiceMembers {
 
 func (r *ResolverOne) HandleRequestSend(request *Request) *Request {
 	if request.Message.IsDestinationEmpty() {
-		request.Message.Destination = r.Resolve(request.Service, request.Message.Path)
+		request.Message.Destination = r.Resolve(request.Binding.service, request.Message.Path)
 	}
 
 	request.respNeeded = request.Message.Destination.Len()

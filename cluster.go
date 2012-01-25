@@ -2,12 +2,14 @@ package nrv
 
 import (
 	"fmt"
+	"net/url"
 )
 
 type Cluster interface {
 	Start()
 	GetService(name string) *Service
 	GetLocalNode() *Node
+	GetBindingURL(bUrl *url.URL) (*Binding, Map)
 
 	RegisterProtocol(protocol Protocol)
 	GetDefaultProtocol() Protocol
@@ -19,6 +21,14 @@ type Node struct {
 	Address string
 	TCPPort int
 	UDPPort int
+}
+
+func (n *Node) Is(other *Node) bool {
+	if n.Address == other.Address && n.TCPPort == other.TCPPort && n.UDPPort == other.UDPPort {
+		return true
+	}
+
+	return false
 }
 
 func (n *Node) String() string {
@@ -61,6 +71,11 @@ func (c *StaticCluster) RegisterProtocol(protocol Protocol) {
 
 func (c *StaticCluster) GetDefaultProtocol() Protocol {
 	return c.defaultProtocol
+}
+
+func (c *StaticCluster) GetBindingURL(bUrl *url.URL) (*Binding, Map) {
+	service := c.GetService(bUrl.Host)
+	return service.FindBinding(bUrl.Path)
 }
 
 func (c *StaticCluster) Start() {

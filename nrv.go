@@ -5,15 +5,16 @@ import (
 )
 
 var (
-	Log Logger = NewLogger(3)
+	Log Logger = NewLogger(0)
 )
 
+// Error with an error code
 type Error struct {
 	Message string
 	Code    uint16
 }
 
-func (e Error) String() string {
+func (e Error) Error() string {
 	return fmt.Sprintf("(%d) %s", e.Code, e.Message)
 }
 
