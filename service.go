@@ -37,6 +37,13 @@ func (s *Service) Bind(binding *Binding) *Binding {
 	return binding
 }
 
+func (s *Service) BindClosure(path string, closure func(request *ReceivedRequest)) *Binding {
+	return s.Bind(&Binding{
+		Path:    path,
+		Closure: closure,
+	})
+}
+
 func (s *Service) BindMethod(path string, controller interface{}, method string) *Binding {
 	return s.Bind(&Binding{
 		Path:       path,
@@ -45,7 +52,7 @@ func (s *Service) BindMethod(path string, controller interface{}, method string)
 	})
 }
 
-func (s *Service) Reverse(controller interface{}, method string, params... string) string {
+func (s *Service) Reverse(controller interface{}, method string, params ...string) string {
 	for _, binding := range s.bindings {
 		if binding.MatchesMethod(controller, method) {
 			return binding.GetPath(params...)

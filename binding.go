@@ -27,9 +27,9 @@ type Binding struct {
 	cluster Cluster
 	service *Service
 
-	Path       string
-	nbParams   int
-	pathRe     *regexp.Regexp
+	Path     string
+	nbParams int
+	pathRe   *regexp.Regexp
 
 	RequestLogger *RequestLogger
 	Pattern       Pattern
@@ -79,7 +79,6 @@ func (b *Binding) init(service *Service, cluster Cluster) {
 		b.ctrlType = reflect.TypeOf(b.Controller)
 		rMethod, found := b.ctrlType.MethodByName(b.Method)
 
-		// TODO: better error handling here
 		if found {
 			b.rflMethod = &rMethod
 		} else {
@@ -122,7 +121,7 @@ func (b *Binding) MatchesMethod(controller interface{}, method string) bool {
 	return false
 }
 
-func (b *Binding) GetPath(params... string) string {
+func (b *Binding) GetPath(params ...string) string {
 	i := 0
 
 	path := paramReplaceRegexp.ReplaceAllStringFunc(b.Path, func(match string) string {
@@ -149,12 +148,17 @@ func (b *Binding) Matches(path string) Map {
 	return nil
 }
 
-func (b *Binding) Call(request *Request) *Request {
+func (b *Binding) Call(reqBuild RequestBuilder) *Request {
+	request := reqBuild.ToRequest()
 	return b.HandleRequestSend(request)
 }
 
 func (b *Binding) HandleRequestSend(request *Request) *Request {
-	Log.Debug("%s> New request to send %s %s", b, request)
+	Log.Debug("%s> New request to send %s", b, request)
+
+	if request.Path == "" {
+		request.Path = b.Path
+	}
 
 	request.Binding = b
 	request.Message.Source = NewServiceMembers(ServiceMember{Token(0), b.cluster.GetLocalNode()})
@@ -180,7 +184,21 @@ func (b *Binding) HandleRequestReceive(request *ReceivedRequest) *ReceivedReques
 		reqVal := reflect.ValueOf(request)
 
 		// TODO: pass params
-		b.rflMethod.Func.Call([]reflect.Value{ctrlVal, reqVal})
+		nbParams := b.rflMethod.Func.Type().NumIn()
+		values := make([]reflect.Value, nbParams)
+		values[0] = ctrlVal
+		values[1] = reqVal
+
+		for i := 2; i < nbParams; i++ {
+			if val, found := request.Data[strconv.Itoa(i-2)]; found {
+				values[i] = reflect.ValueOf(val)
+			} else {
+				Log.Warning("Didn't get all paramters to call %s", b)
+				values[i] = reflect.ValueOf("")
+			}
+		}
+
+		b.rflMethod.Func.Call(values)
 
 	} else {
 		Log.Fatal("%s> No closure nor method set", b)
