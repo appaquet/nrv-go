@@ -2,7 +2,6 @@ package nrv
 
 import (
 	"fmt"
-	"hash/crc32"
 	"sort"
 )
 
@@ -105,16 +104,30 @@ func (s *Service) Call(path string, reqBuild RequestBuilder) {
 	}
 }
 
-type Token uint32
+func (s *Service) Resolve(token Token, count int) *ServiceMembers {
+	ret := NewServiceMembers()
 
-func ResolveToken(data string) Token {
-	if data == "" {
-		return Token(0)
+	// TODO: support for count
+
+	var candidate *ServiceMember
+	for _, member := range s.Members.Slice {
+		if member.Token <= token && (candidate == nil || candidate.Token < member.Token) {
+			candidate = &member
+		}
 	}
 
-	return Token(crc32.ChecksumIEEE([]byte(data)))
+	if candidate == nil {
+		if s.Members.Empty() {
+			ret.Add(s.Members.Get(0))
+		}
+	} else {
+		ret.Add(*candidate)
+	}
+
+	return ret
 }
 
+// Member of a service ring
 type ServiceMember struct {
 	Token Token
 	Node  *Node
@@ -159,61 +172,4 @@ func (sm *ServiceMembers) Less(i, j int) bool {
 
 func (sm *ServiceMembers) Swap(i, j int) {
 	sm.Slice[i], sm.Slice[j] = sm.Slice[i], sm.Slice[i]
-}
-
-type Resolver interface {
-	CallHandler
-
-	Resolve(service *Service, path string) *ServiceMembers
-}
-
-type ResolverOne struct {
-	nextHandler     CallHandler
-	previousHandler CallHandler
-}
-
-func (r *ResolverOne) InitHandler(binding *Binding) {
-}
-
-func (r *ResolverOne) SetNextHandler(handler CallHandler) {
-	r.nextHandler = handler
-}
-
-func (r *ResolverOne) SetPreviousHandler(handler CallHandler) {
-	r.previousHandler = handler
-}
-
-func (r *ResolverOne) Resolve(service *Service, path string) *ServiceMembers {
-	pathToken := ResolveToken(path)
-	ret := NewServiceMembers()
-
-	var candidate *ServiceMember
-	for _, member := range service.Members.Slice {
-		if member.Token <= pathToken && (candidate == nil || candidate.Token < member.Token) {
-			candidate = &member
-		}
-	}
-
-	if candidate == nil {
-		if service.Members.Empty() {
-			ret.Add(service.Members.Get(0))
-		}
-	} else {
-		ret.Add(*candidate)
-	}
-
-	return ret
-}
-
-func (r *ResolverOne) HandleRequestSend(request *Request) *Request {
-	if request.Message.IsDestinationEmpty() {
-		request.Message.Destination = r.Resolve(request.Binding.service, request.Message.Path)
-	}
-
-	request.respNeeded = request.Message.Destination.Len()
-	return r.nextHandler.HandleRequestSend(request)
-}
-
-func (r *ResolverOne) HandleRequestReceive(request *ReceivedRequest) *ReceivedRequest {
-	return r.previousHandler.HandleRequestReceive(request)
 }

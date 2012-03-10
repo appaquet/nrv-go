@@ -65,7 +65,7 @@ func (b *Binding) init(service *Service, cluster Cluster) {
 		b.RequestLogger = &RequestLogger{}
 	}
 	if b.Resolver == nil {
-		b.Resolver = &ResolverOne{}
+		b.Resolver = &ResolverPath{Count: 1}
 	}
 	if b.Pattern == nil {
 		b.Pattern = &PatternRequestReply{}
